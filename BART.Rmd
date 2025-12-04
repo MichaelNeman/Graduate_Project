@@ -1,0 +1,415 @@
+---
+title: "BART_env"
+author: "Michael Neman"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidymodels)
+library(BART)
+library(dbarts)
+```
+
+Import the data.Update path as needed.
+```{r}
+tss_df <- read.csv("C:/Users/mnema/Documents/School/Project/Training_data/TSS_top_25.csv")
+phos_df <- read.csv("C:/Users/mnema/Documents/School/Project/Training_data/Phos_top_25.csv")
+no3_df <- read.csv("C:/Users/mnema/Documents/School/Project/Training_data/NO3_top_25.csv")
+```
+
+set seed and split data for training and testing purposes.
+```{r}
+set.seed(42)
+
+split_tss <- initial_split(tss_df, prop = 0.8, strata = NULL)
+train_tss <- training(split_tss)
+test_tss <- testing(split_tss)
+
+split_phos <- initial_split(phos_df, prop = 0.8, strata = NULL)
+train_phos <- training(split_phos)
+test_phos <- testing(split_phos)
+
+split_no3 <- initial_split(no3_df, prop = 0.8, strata = NULL)
+train_no3 <- training(split_no3)
+test_no3 <- testing(split_no3)
+```
+
+
+setup the BART model parameters for cross validation using k-fold.
+
+TSS
+```{r}
+set.seed(42)
+bart_tss_cv <- 
+  parsnip::bart(
+    trees = tune(), 
+    prior_terminal_node_coef = tune()) |> 
+  set_mode("regression") |>
+  set_engine("dbarts",
+             keeptrees = TRUE,
+             nskip = 1000, 
+             ndpost = 4000,
+             nchain = 4)
+
+
+bart_recipe_tss <- 
+  recipe(TSS ~ ., data = train_tss)
+
+
+bart_wf_tss <- 
+  workflow() |>
+  add_recipe(bart_recipe_tss) |>
+  add_model(bart_tss_cv)
+```
+
+```{r}
+set.seed(42)
+
+folds <- rsample::vfold_cv(train_tss, v=5)
+
+param_grid <- expand.grid(
+  trees = c(50L, 100L, 150L),
+  prior_terminal_node_coef = c(0.9, 0.95, 0.98)
+) %>%
+  as_tibble()
+
+```
+
+```{r}
+set.seed(42)
+results_tss <- tune::tune_grid(
+  object = bart_wf_tss,
+  resamples = folds,
+  grid = param_grid,
+  metrics = yardstick::metric_set(yardstick::rmse, yardstick::mae),
+  control = tune::control_grid(
+    save_pred = TRUE,
+    verbose = TRUE,
+    save_workflow = TRUE
+  )
+)
+```
+
+```{r}
+tune::collect_metrics(results_tss)
+
+best_rmse <- tune::select_best(results_tss, metric = "rmse")
+best_mae <- tune::select_best(results_tss, metric = "mae")
+
+print(best_rmse)
+print(best_mae)
+```
+
+set up model with best parameters per k-fold cv.
+```{r}
+set.seed(42)
+bart_tss <- 
+  parsnip::bart(
+    trees = 150, 
+    prior_terminal_node_coef = 0.98) |> 
+  set_mode("regression") |>
+  set_engine("dbarts",
+             keeptrees = TRUE,
+             nskip = 1000, 
+             ndpost = 4000,
+             nchain = 4)
+  
+
+
+bart_recipe_tss <- 
+  recipe(TSS ~ ., data = train_tss)
+
+
+bart_wf_tss <- 
+  workflow() |>
+  add_recipe(bart_recipe_tss) |>
+  add_model(bart_tss)
+```
+
+
+fit model and make predictions.
+```{r}
+set.seed(42)
+bart_fit_tss <- 
+  bart_wf_tss |>
+  fit(data = train_tss)
+
+y_pred_tss <-predict(bart_fit_tss, new_data = test_tss)
+
+tss_results <- data.frame(
+  TSS = test_tss$TSS,
+  tss_hat = y_pred_tss
+)
+
+tss_mae <- mae(tss_results, truth = TSS, estimate = .pred)
+tss_rmse <- rmse(tss_results, truth = TSS, estimate = .pred)
+
+print(tss_mae)
+print(tss_rmse)
+```
+
+```{r}
+write.csv(tss_results, "tss_bart_results.csv", row.names = FALSE)
+```
+
+
+Phos
+```{r}
+set.seed(42)
+bart_phos_cv <- 
+  parsnip::bart(
+    trees = tune(), 
+    prior_terminal_node_coef = tune()) |> 
+  set_mode("regression") |>
+  set_engine("dbarts",
+             keeptrees = TRUE,
+             nskip = 1000, 
+             ndpost = 4000,
+             nchain = 4)
+
+
+bart_recipe_phos <- 
+  recipe(Phos ~ ., data = train_phos)
+
+
+bart_wf_phos <- 
+  workflow() |>
+  add_recipe(bart_recipe_phos) |>
+  add_model(bart_phos_cv)
+```
+
+
+```{r}
+set.seed(42)
+
+folds <- rsample::vfold_cv(train_phos, v=5)
+
+param_grid_phos <- expand.grid(
+  trees = c(50L, 100L, 150L),
+  prior_terminal_node_coef = c(0.9, 0.95, 0.98)
+) %>%
+  as_tibble()
+
+```
+
+```{r}
+set.seed(42)
+resulst_phos <- tune::tune_grid(
+  object = bart_wf_phos,
+  resamples = folds,
+  grid = param_grid_phos,
+  metrics = yardstick::metric_set(yardstick::rmse, yardstick::mae),
+  control = tune::control_grid(
+    save_pred = TRUE,
+    verbose = TRUE,
+    save_workflow = TRUE
+  )
+)
+```
+
+```{r}
+tune::collect_metrics(resulst_phos)
+
+best_rmse_phos <- tune::select_best(resulst_phos, metric = "rmse")
+best_mae_phos <- tune::select_best(resulst_phos, metric = "mae")
+
+print(best_rmse_phos)
+print(best_mae_phos)
+```
+
+
+```{r}
+set.seed(42)
+bart_phos <- 
+  parsnip::bart(
+    trees = 100, 
+    prior_terminal_node_coef = 0.95) |> 
+  set_mode("regression") |>
+  set_engine("dbarts",
+             keeptrees = TRUE,
+             nskip = 1000, 
+             ndpost = 4000,
+             nchain = 4)
+
+
+bart_recipe_phos <- 
+  recipe(Phos ~ ., data = train_phos)
+
+
+bart_wf_phos <- 
+  workflow() |>
+  add_recipe(bart_recipe_phos) |>
+  add_model(bart_phos)
+```
+
+
+fit model and make predictions.
+```{r}
+set.seed(42)
+bart_fit_phos <- 
+  bart_wf_phos |>
+  fit(data = train_phos)
+
+y_pred_phos <-predict(bart_fit_phos, new_data = test_phos)
+
+phos_results <- data.frame(
+  Phos = test_phos$Phos,
+  Phos_hat = y_pred_phos
+)
+
+phos_mae <- mae(phos_results, truth = Phos, estimate = .pred)
+phos_rmse <- rmse(phos_results, truth = Phos, estimate = .pred)
+
+print(phos_mae)
+print(phos_rmse)
+
+```
+```{r}
+write.csv(phos_results, "phos_bart_results.csv", row.names = FALSE)
+```
+
+
+NO3
+```{r}
+set.seed(42)
+bart_no3_cv <- 
+  parsnip::bart(
+    trees = tune(), 
+    prior_terminal_node_coef = tune()) |> 
+  set_mode("regression") |>
+  set_engine("dbarts",
+             keeptrees = TRUE,
+             nskip = 1000, 
+             ndpost = 4000,
+             nchain = 4)
+
+
+bart_recipe_no3 <- 
+  recipe(NO3 ~ ., data = train_no3)
+
+
+bart_wf_no3 <- 
+  workflow() |>
+  add_recipe(bart_recipe_no3) |>
+  add_model(bart_no3_cv)
+```
+
+```{r}
+set.seed(42)
+
+folds <- rsample::vfold_cv(train_no3, v=5)
+
+param_grid_no3 <- expand.grid(
+  trees = c(50L, 100L, 150L),
+  prior_terminal_node_coef = c(0.9, 0.95, 0.98)
+) %>%
+  as_tibble()
+
+```
+
+```{r}
+set.seed(42)
+resulst_no3 <- tune::tune_grid(
+  object = bart_wf_no3,
+  resamples = folds,
+  grid = param_grid_no3,
+  metrics = yardstick::metric_set(yardstick::rmse, yardstick::mae),
+  control = tune::control_grid(
+    save_pred = TRUE,
+    verbose = TRUE,
+    save_workflow = TRUE
+  )
+)
+```
+
+```{r}
+tune::collect_metrics(resulst_no3)
+
+rmse_no3 <- tune::select_best(resulst_no3, metric = "rmse")
+mae_no3 <- tune::select_best(resulst_no3, metric = "mae")
+
+print(rmse_no3)
+print(mae_no3)
+```
+
+
+```{r}
+set.seed(42)
+bart_no3 <- 
+  parsnip::bart(
+    trees = 100, 
+    prior_terminal_node_coef = 0.95) |> 
+  set_mode("regression") |>
+  set_engine("dbarts",
+             keeptrees = TRUE,
+             nskip = 1000, 
+             ndpost = 4000,
+             nchain = 4)
+
+
+bart_recipe_no3 <- 
+  recipe(NO3 ~ ., data = train_no3)
+
+
+bart_wf_no3 <- 
+  workflow() |>
+  add_recipe(bart_recipe_no3) |>
+  add_model(bart_no3)
+```
+
+
+fit model and make predictions.
+```{r}
+set.seed(42)
+bart_fit_no3 <- 
+  bart_wf_no3 |>
+  fit(data = train_no3)
+
+y_pred_no3 <-predict(bart_fit_no3, new_data = test_no3)
+
+no3_results <- data.frame(
+  NO3 = test_no3$NO3,
+  no3_hat = y_pred_no3
+)
+
+no3_mae <- mae(no3_results, truth = NO3, estimate = .pred)
+no3_rmse <- rmse(no3_results, truth = NO3, estimate = .pred)
+
+print(no3_mae)
+print(no3_rmse)
+
+
+```
+
+
+```{r}
+write.csv(no3_results, "no3_bart_results.csv", row.names = FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
